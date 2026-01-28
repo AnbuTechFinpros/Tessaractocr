@@ -24,10 +24,8 @@ SUPPORTED_EXT = {".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff"}
 # ================= OCR ================= #
 
 def preprocess_image(img: Image.Image) -> Image.Image:
-    img = ImageOps.grayscale(img)
-    img = ImageOps.autocontrast(img)
-    img = img.filter(ImageFilter.UnsharpMask(radius=1, percent=150, threshold=3))
-    img = img.point(lambda x: 0 if x < 160 else 255, mode="1")
+    # No preprocessing - return original image for maximum OCR accuracy
+    # Tesseract handles preprocessing internally better than custom code
     return img
 
 
@@ -106,6 +104,8 @@ def extract_header(text: str, vendor: str, patterns: Dict[str, Dict[str, Any]]) 
         "account_holder_name": rx(text, pat.get("account_holder_name")),
         "account_number": rx(text, pat.get("account_number")),
         "ifsc_code": rx(text, pat.get("ifsc_code")),
+        "buyer_name": rx(text, pat.get("buyer_name")),
+        "buyer_gstin": rx(text, pat.get("buyer_gstin")),
         "taxable_total": rx(text, pat.get("taxable_total")),
         "cgst_total_amount": rx(text, pat.get("cgst_total_amount")),
         "sgst_total_amount": rx(text, pat.get("sgst_total_amount")),
@@ -472,8 +472,8 @@ def post_process(rows: List[Dict[str, Any]]) -> None:
         required_fields = [
             "vendor", "invoice_number", "invoice_date", "supplier_name", "supplier_gstin",
             "supplier_pan", "supplier_address", "supplier_phone_no", "supplier_email",
-            "account_holder_name", "account_number", "ifsc_code", "taxable_total",
-            "cgst_total_amount", "sgst_total_amount", "igst_total_amount", "grand_total",
+            "account_holder_name", "account_number", "ifsc_code", "buyer_name", "buyer_gstin",
+            "taxable_total", "cgst_total_amount", "sgst_total_amount", "igst_total_amount", "grand_total",
             "item_name", "hsn_code", "quantity", "unit", "unit_price", "amount",
             "gst_rate", "HSN/SAC_type", "supply_type", "voucher_type",
             "cgst_amount", "sgst_amount", "igst_amount", "file_name"
