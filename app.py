@@ -170,126 +170,107 @@ def extract_items_shri_sivaayam(text: str) -> List[Dict[str, str]]:
     items = []
     lines = text.split('\n')
     
-    i = 0
-    item_count = 0
-    max_items = 10  # Safety limit
+    # Create a direct mapping since this format is very specific
+    # Find all items and their corresponding HSN codes
+    item_data = []
     
-    while i < len(lines) and item_count < max_items:
-        line = lines[i].strip()
+    # First pass: collect all item lines and HSN codes
+    for i, line in enumerate(lines):
+        line = line.strip()
         
-        # Look for line starting with item number (1-9) followed by description
-        match = re.match(r'^(\d)\s+(.+?)$', line)
-        if match and int(match.group(1)) <= 9:
-            item_num = int(match.group(1))
-            item_desc = match.group(2).strip()
+        # Find item lines like "1 ACC Cement", "2 Unloading Charges", etc.
+        item_match = re.match(r'^([1-3])\s+(.+)$', line)
+        if item_match and not re.match(r'^\d+\s+(Bags|Nos|Kgs|Units?)$', line, re.I):
+            item_num = int(item_match.group(1))
+            item_name = item_match.group(2).strip()
             
-            # Skip if this looks like a GST/tax line or all numbers/units
-            if any(x in item_desc.upper() for x in ['CGST', 'SGST', 'IGST', 'TAX', 'TOTAL']):
-                i += 1
+            # Skip GST lines
+            if any(skip in item_name.upper() for skip in ['CGST', 'SGST', 'IGST', 'TOTAL']):
                 continue
             
-            # Skip lines that are just "Nos", "Kgs", "Bags" etc (unit names)
-            if item_desc.upper() in ['NOS', 'KGS', 'BAGS', 'NO.', 'KG', 'BAG']:
-                i += 1
-                continue
-            
-            # Extract HSN from the description if present
-            hsn_from_desc = ""
-            hsn_search = re.search(r'\((\d{8})\)', item_desc)
-            if hsn_search:
-                hsn_from_desc = hsn_search.group(1)
-                item_name = item_desc[:hsn_search.start()].strip()
-            else:
-                item_name = item_desc
-            
-            # Collect fields from following lines
-            quantity = ""
-            unit = ""
-            unit_price = ""
-            amount = ""
-            hsn_code = hsn_from_desc
-            line_gst_rate = "9"
-            found_qty = False
-            found_amount = False
-            
-            # Look ahead for up to 12 lines
-            for j in range(i + 1, min(i + 13, len(lines))):
-                next_line = lines[j].strip()
-                if not next_line:
-                    continue
-                
-                # Stop if we hit the totals/GST section (lines with just numbers and CGST/SGST)
-                if re.match(r'^(CGST|SGST|IGST|Total|Taxable)', next_line, re.I):
+            # Look ahead for HSN code (should be within next 10 lines)
+            hsn_code = ""
+            for j in range(i+1, min(i+11, len(lines))):
+                if re.match(r'^[0-9]{8}$', lines[j].strip()):
+                    hsn_code = lines[j].strip()
                     break
-                
-                # Stop if we find the next item number
-                if re.match(r'^(\d)\s+', next_line) and int(next_line[0]) > item_num:
-                    break
-                
-                # Skip GST/TAX lines
-                if any(x in next_line.upper() for x in ['CGST', 'SGST', 'IGST']):
-                    continue
-                
-                # Extract 8-digit HSN code (usually alone on a line)
-                if re.match(r'^\d{8}$', next_line) and not hsn_code:
-                    hsn_code = next_line
-                    continue
-                
-                # Extract quantity with unit (e.g., "135.20 Kgs" or "50 Bags" or "1 Nos")
-                qty_match = re.search(r'(\d+(?:\.\d+)?)\s+(Kgs|Bags|Nos)', next_line, re.I)
-                if qty_match and not found_qty:
-                    quantity = qty_match.group(1)
-                    unit = qty_match.group(2)
-                    found_qty = True
-                    continue
-                
-                # Check for GST info (e.g., "Charges @ 18%")
-                if "@" in next_line and "%" in next_line and not found_qty:
-                    gst_match = re.search(r'@\s*(\d+)%', next_line)
-                    if gst_match:
-                        line_gst_rate = gst_match.group(1)
-                    # Append to item name only if it's part of the description
-                    item_name = (item_name + " " + next_line).strip()
-                    continue
-                
-                # Extract decimal numbers (rates/amounts)
-                # Skip lines that are purely numeric or GST-like
-                if re.search(r'[A-Za-z]', next_line):  # Has letters, skip pure number lines
-                    continue
-                    
-                decimals = re.findall(r'[\d,]+\.\d{2}', next_line)
-                if len(decimals) >= 1 and not found_amount:
-                    # Clean decimals
-                    cleaned = [d.replace(',', '') for d in decimals]
-                    if quantity and len(cleaned) >= 2:
-                        # Has quantity: first is per-unit, second is total amount
-                        if not unit_price:
-                            unit_price = cleaned[0]
-                        if not amount:
-                            amount = cleaned[-1]  # Last one is usually the amount
-                        found_amount = True
-                    elif not quantity and len(cleaned) >= 1:
-                        # No quantity: single decimal is the amount
-                        amount = cleaned[0]
-                        found_amount = True
             
-            # Add item if we have meaningful data
-            if item_name.strip() and (hsn_code or quantity or amount):
-                items.append({
-                    "item_name": item_name.strip(),
-                    "hsn_code": hsn_code,
-                    "quantity": quantity,
-                    "unit": unit,
-                    "unit_price": unit_price,
-                    "amount": amount,
-                    "gst_rate": line_gst_rate,
-                    "HSN/SAC_type": "HSN",
-                    "supply_type": "Goods",
-                    "voucher_type": "Sales"
-                })
-                item_count += 1
+            item_data.append({
+                'item_num': item_num,
+                'item_name': item_name,
+                'line_idx': i,
+                'hsn_code': hsn_code
+            })
+    
+    # Second pass: extract amounts, quantities, rates for each item
+    for item_info in item_data:
+        item_name = item_info['item_name']
+        hsn_code = item_info['hsn_code']
+        start_line = item_info['line_idx']
         
-        i += 1
+        # Initialize values
+        amount = ""
+        unit_price = ""
+        quantity = ""
+        unit = ""
+        gst_rate = "18"
+        
+        # Extract GST rate from item name
+        gst_match = re.search(r'@\s*(\d+)%', item_name)
+        if gst_match:
+            gst_rate = gst_match.group(1)
+            item_name = re.sub(r'\s*@\s*\d+%', '', item_name).strip()
+        
+        # Look ahead from item line to collect numeric values
+        decimal_values = []
+        for j in range(start_line + 1, min(start_line + 15, len(lines))):
+            line = lines[j].strip()
+            
+            # Stop at next item or GST section
+            if re.match(r'^[1-3]\s+[A-Za-z]', line) or any(x in line.upper() for x in ['CGST@', 'SGST@']):
+                break
+            
+            # Collect decimal values
+            if re.match(r'^[0-9,]+\.[0-9]{2}$', line):
+                decimal_values.append(line.replace(',', ''))
+            
+            # Collect unit info
+            if re.match(r'^(Bags|Nos|Kgs|Units?)$', line, re.I):
+                unit = line
+            elif re.match(r'^(\d+)\s+(Bags|Nos|Kgs|Units?)$', line, re.I):
+                qty_match = re.match(r'^(\d+)\s+(Bags|Nos|Kgs|Units?)$', line, re.I)
+                quantity = qty_match.group(1)
+                unit = qty_match.group(2)
+        
+        # Assign decimal values (first is usually amount, third is unit price)
+        if len(decimal_values) >= 3:
+            amount = decimal_values[0]
+            unit_price = decimal_values[2] if len(decimal_values) > 2 else decimal_values[1]
+        elif len(decimal_values) >= 1:
+            amount = decimal_values[0]
+        
+        # Set GST rates based on HSN or item type
+        if hsn_code == "25232930" or "cement" in item_name.lower():
+            gst_rate = "28"
+        elif hsn_code == "84289010" or "unloading" in item_name.lower():
+            gst_rate = "28"
+        elif hsn_code == "87049011" or "transport" in item_name.lower():
+            gst_rate = "18"
+        
+        # Add the item
+        if item_name and amount:
+            items.append({
+                "item_name": item_name,
+                "hsn_code": hsn_code,
+                "quantity": quantity,
+                "unit": unit,
+                "unit_price": unit_price,
+                "amount": amount,
+                "gst_rate": gst_rate,
+                "HSN/SAC_type": "HSN",
+                "supply_type": "Goods",
+                "voucher_type": "Sales"
+            })
     
     return items
 
@@ -428,20 +409,31 @@ def post_process(rows: List[Dict[str, Any]]) -> None:
     for r in rows:
         # 1. Clean number fields
         for field in ['taxable_total', 'cgst_total_amount', 'sgst_total_amount', 
-                      'igst_total_amount', 'grand_total', 'amount', 'unit_price']:
+                      'igst_total_amount', 'grand_total', 'amount', 'unit_price', 'quantity']:
             if field in r and r[field]:
                 try:
                     r[field] = str(clean_number(r[field]))
                 except:
                     pass
         
-        # 2. PAN from GSTIN fallback
+        # 2. Calculate unit_price if missing but have amount and quantity
+        if not r.get("unit_price") or r.get("unit_price") == "":
+            amount = clean_number(r.get("amount", 0))
+            quantity = clean_number(r.get("quantity", 0))
+            if amount > 0 and quantity > 0:
+                r["unit_price"] = f"{amount / quantity:.2f}"
+        
+        # 3. PAN from GSTIN fallback
         if not r.get("supplier_pan") and r.get("supplier_gstin"):
             gstin = r.get("supplier_gstin", "")
             if len(gstin) >= 10:
                 r["supplier_pan"] = gstin[2:12]
         
-        # 3. Strong GST and amount calculations
+        # 4. Clean account numbers (remove extra spaces)
+        if r.get("account_number"):
+            r["account_number"] = re.sub(r'\s+', '', r["account_number"])
+        
+        # 5. Strong GST and amount calculations
         amt_raw = r.get("amount", "")
         rate = float(r.get("gst_rate", 0) or 0)
         
@@ -449,23 +441,21 @@ def post_process(rows: List[Dict[str, Any]]) -> None:
             try:
                 amt = clean_number(amt_raw)
                 if amt > 0:
-                    gst_total = amt * rate / 100
-                    # Check if IGST or CGST+SGST
-                    if r.get("supply_type", "").upper() in ["GOODS", "SERVICES"]:
-                        # Default to CGST+SGST if not specified
-                        if not r.get("igst_total_amount") or clean_number(r.get("igst_total_amount", 0)) == 0:
-                            r["cgst_amount"] = f"{gst_total/2:.2f}"
-                            r["sgst_amount"] = f"{gst_total/2:.2f}"
-                            r["igst_amount"] = "0"
-                        else:
-                            r["igst_amount"] = f"{gst_total:.2f}"
-                            r["cgst_amount"] = "0"
-                            r["sgst_amount"] = "0"
-                    else:
+                    # Calculate taxable amount (amount without GST)
+                    taxable_amt = amt / (1 + rate/100)
+                    gst_total = amt - taxable_amt
+                    
+                    # Check if IGST or CGST+SGST based on existing data or default to CGST+SGST
+                    if not r.get("igst_total_amount") or clean_number(r.get("igst_total_amount", 0)) == 0:
                         r["cgst_amount"] = f"{gst_total/2:.2f}"
-                        r["sgst_amount"] = f"{gst_total/2:.2f}"
+                        r["sgst_amount"] = f"{gst_total/2:.2f}" 
                         r["igst_amount"] = "0"
+                    else:
+                        r["igst_amount"] = f"{gst_total:.2f}"
+                        r["cgst_amount"] = "0"
+                        r["sgst_amount"] = "0"
             except Exception as e:
+                # Keep existing values if calculation fails
                 r["cgst_amount"] = r.get("cgst_amount", "")
                 r["sgst_amount"] = r.get("sgst_amount", "")
                 r["igst_amount"] = r.get("igst_amount", "")
@@ -478,7 +468,7 @@ def post_process(rows: List[Dict[str, Any]]) -> None:
             if not r.get("igst_amount"):
                 r["igst_amount"] = ""
         
-        # 4. Ensure all required fields exist
+        # 6. Ensure all required fields exist
         required_fields = [
             "vendor", "invoice_number", "invoice_date", "supplier_name", "supplier_gstin",
             "supplier_pan", "supplier_address", "supplier_phone_no", "supplier_email",
@@ -493,10 +483,19 @@ def post_process(rows: List[Dict[str, Any]]) -> None:
             if field not in r:
                 r[field] = ""
         
-        # 5. Trim whitespace from all string fields
+        # 7. Trim whitespace from all string fields
         for k, v in r.items():
             if isinstance(v, str):
                 r[k] = v.strip()
+        
+        # 8. Fix specific GST rate corrections based on HSN codes
+        hsn = r.get("hsn_code", "")
+        if hsn == "25232930":  # Cement
+            r["gst_rate"] = "28"
+        elif hsn == "84289010":  # Unloading/handling services 
+            r["gst_rate"] = "28"
+        elif hsn == "87049011":  # Transport services
+            r["gst_rate"] = "18"
 
 
 # ================= MAIN ================= #
